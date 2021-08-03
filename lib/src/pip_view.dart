@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'dismiss_keyboard.dart';
 import 'constants.dart';
+import 'dismiss_keyboard.dart';
 
 class PIPView extends StatefulWidget {
   final PIPViewCorner initialCorner;
   final double? floatingWidth;
   final double? floatingHeight;
   final bool avoidKeyboard;
+  final Navigator bottomView;
 
   final Widget Function(
     BuildContext context,
@@ -21,10 +22,11 @@ class PIPView extends StatefulWidget {
     this.floatingWidth,
     this.floatingHeight,
     this.avoidKeyboard = true,
+    required this.bottomView,
   }) : super(key: key);
 
   @override
-  PIPViewState createState() => PIPViewState();
+  PIPViewState createState() => PIPViewState(bottomView);
 
   static PIPViewState? of(BuildContext context) {
     return context.findAncestorStateOfType<PIPViewState>();
@@ -32,12 +34,15 @@ class PIPView extends StatefulWidget {
 }
 
 class PIPViewState extends State<PIPView> with TickerProviderStateMixin {
-  Widget? _bottomView;
+  PIPViewState(this._bottomView);
+  Navigator _bottomView;
   late final AnimationController _toggleFloatingAnimationController;
   late final AnimationController _dragAnimationController;
   late PIPViewCorner _corner;
   Offset _dragOffset = Offset.zero;
+  bool _isVisible = true;
   bool _isDragging = false;
+  Function()? _callback;
   Map<PIPViewCorner, Offset> _offsets = {};
 
   @override
@@ -52,6 +57,7 @@ class PIPViewState extends State<PIPView> with TickerProviderStateMixin {
       duration: defaultAnimationDuration,
       vsync: this,
     );
+    _toggleFloatingAnimationController.forward();
   }
 
   void _updateCornersOffsets({
@@ -71,25 +77,37 @@ class PIPViewState extends State<PIPView> with TickerProviderStateMixin {
         _dragAnimationController.isAnimating;
   }
 
-  void presentBelow(Widget widget) {
-    if (_isAnimating() || _bottomView != null) return;
+  void onTouch(Function() onTouch) {
+    _callback = onTouch;
+  }
+
+  void showPIP() {
+    print('working');
+    if (!_isVisible) {
+      setState(() {
+        _isVisible = true;
+      });
+    }
+  }
+
+  void hidePIP() {
+    if (_isVisible) {
+      setState(() {
+        _isVisible = false;
+      });
+    }
+  }
+
+  void _presentBelow(Widget widget) {
+    if (_isAnimating()) return;
     dismissKeyboard(context);
-    setState(() {
-      _bottomView = widget;
-    });
     _toggleFloatingAnimationController.forward();
   }
 
-  void stopFloating() {
-    if (_isAnimating() || _bottomView == null) return;
+  void _stopFloating() {
+    if (_isAnimating()) return;
     dismissKeyboard(context);
-    _toggleFloatingAnimationController.reverse().whenCompleteOrCancel(() {
-      if (mounted) {
-        setState(() {
-          _bottomView = null;
-        });
-      }
-    });
+    _toggleFloatingAnimationController.reverse();
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -143,7 +161,7 @@ class PIPViewState extends State<PIPView> with TickerProviderStateMixin {
     if (widget.avoidKeyboard) {
       windowPadding += mediaQuery.viewInsets;
     }
-    final isFloating = _bottomView != null;
+    //final isFloating = _bottomView != null;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -179,94 +197,88 @@ class PIPViewState extends State<PIPView> with TickerProviderStateMixin {
 
         return Stack(
           children: <Widget>[
-            if (isFloating)
-              Navigator(
-                onGenerateRoute: (settings) {
-                  return MaterialPageRoute(builder: (_) {
-                    return _bottomView!;
-                  });
-                },
-              ),
-            AnimatedBuilder(
-              animation: Listenable.merge([
-                _toggleFloatingAnimationController,
-                _dragAnimationController,
-              ]),
-              builder: (context, child) {
-                final animationCurve = CurveTween(
-                  curve: Curves.easeInOutQuad,
-                );
-                final dragAnimationValue = animationCurve.transform(
-                  _dragAnimationController.value,
-                );
-                final toggleFloatingAnimationValue = animationCurve.transform(
-                  _toggleFloatingAnimationController.value,
-                );
+            _bottomView,
+            if (_isVisible)
+              AnimatedBuilder(
+                animation: Listenable.merge([
+                  _toggleFloatingAnimationController,
+                  _dragAnimationController,
+                ]),
+                builder: (context, child) {
+                  final animationCurve = CurveTween(
+                    curve: Curves.easeInOutQuad,
+                  );
+                  final dragAnimationValue = animationCurve.transform(
+                    _dragAnimationController.value,
+                  );
+                  final toggleFloatingAnimationValue = animationCurve.transform(
+                    _toggleFloatingAnimationController.value,
+                  );
 
-                final floatingOffset = _isDragging
-                    ? _dragOffset
-                    : Tween<Offset>(
-                        begin: _dragOffset,
-                        end: calculatedOffset,
-                      ).transform(_dragAnimationController.isAnimating
-                        ? dragAnimationValue
-                        : toggleFloatingAnimationValue);
-                final borderRadius = Tween<double>(
-                  begin: 0,
-                  end: 10,
-                ).transform(toggleFloatingAnimationValue);
-                final width = Tween<double>(
-                  begin: fullWidgetSize.width,
-                  end: floatingWidgetSize.width,
-                ).transform(toggleFloatingAnimationValue);
-                final height = Tween<double>(
-                  begin: fullWidgetSize.height,
-                  end: floatingWidgetSize.height,
-                ).transform(toggleFloatingAnimationValue);
-                final scale = Tween<double>(
-                  begin: 1,
-                  end: scaledDownScale,
-                ).transform(toggleFloatingAnimationValue);
-                return Positioned(
-                  left: floatingOffset.dx,
-                  top: floatingOffset.dy,
-                  child: GestureDetector(
-                    onPanStart: isFloating ? _onPanStart : null,
-                    onPanUpdate: isFloating ? _onPanUpdate : null,
-                    onPanCancel: isFloating ? _onPanCancel : null,
-                    onPanEnd: isFloating ? _onPanEnd : null,
-                    onTap: isFloating ? stopFloating : null,
-                    child: Material(
-                      elevation: 10,
-                      borderRadius: BorderRadius.circular(borderRadius),
-                      child: Container(
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(borderRadius),
-                        ),
-                        width: width,
-                        height: height,
-                        child: Transform.scale(
-                          scale: scale,
-                          child: OverflowBox(
-                            maxHeight: fullWidgetSize.height,
-                            maxWidth: fullWidgetSize.width,
-                            child: IgnorePointer(
-                              ignoring: isFloating,
-                              child: child,
+                  final floatingOffset = _isDragging
+                      ? _dragOffset
+                      : Tween<Offset>(
+                          begin: _dragOffset,
+                          end: calculatedOffset,
+                        ).transform(_dragAnimationController.isAnimating
+                          ? dragAnimationValue
+                          : toggleFloatingAnimationValue);
+                  final borderRadius = Tween<double>(
+                    begin: 0,
+                    end: 10,
+                  ).transform(toggleFloatingAnimationValue);
+                  final width = Tween<double>(
+                    begin: fullWidgetSize.width,
+                    end: floatingWidgetSize.width,
+                  ).transform(toggleFloatingAnimationValue);
+                  final height = Tween<double>(
+                    begin: fullWidgetSize.height,
+                    end: floatingWidgetSize.height,
+                  ).transform(toggleFloatingAnimationValue);
+                  final scale = Tween<double>(
+                    begin: 1,
+                    end: scaledDownScale,
+                  ).transform(toggleFloatingAnimationValue);
+                  return Positioned(
+                    left: floatingOffset.dx,
+                    top: floatingOffset.dy,
+                    child: GestureDetector(
+                      onPanStart: _onPanStart,
+                      onPanUpdate: _onPanUpdate,
+                      onPanCancel: _onPanCancel,
+                      onPanEnd: _onPanEnd,
+                      onTap: _callback,
+                      child: Material(
+                        elevation: 10,
+                        borderRadius: BorderRadius.circular(borderRadius),
+                        child: Container(
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(borderRadius),
+                          ),
+                          width: width,
+                          height: height,
+                          child: Transform.scale(
+                            scale: scale,
+                            child: OverflowBox(
+                              maxHeight: fullWidgetSize.height,
+                              maxWidth: fullWidgetSize.width,
+                              child: IgnorePointer(
+                                ignoring: true,
+                                child: child,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
-              child: Builder(
-                builder: (context) => widget.builder(context, isFloating),
+                  );
+                },
+                child: Builder(
+                  builder: (context) => widget.builder(context, true),
+                ),
               ),
-            ),
           ],
         );
       },
